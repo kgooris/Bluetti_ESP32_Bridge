@@ -3,6 +3,7 @@
 #include "BWifi.h"
 #include "BTooth.h"
 #include "utils.h"
+#include "display.h"
 
 #include <WiFi.h>
 #include <PubSubClient.h>
@@ -429,6 +430,10 @@ void handleMQTT(){
     }
     if (!isMQTTconnected() && publishErrorCount > 5){
       Serial.println(F("MQTT lost connection, try to reconnect"));
+       #ifdef DISPLAY
+      // update display
+        disp_setMqttStatus(false);
+      #endif
       client.disconnect();
       lastMQTTMessage=0;
       previousDeviceStatePublish=0;

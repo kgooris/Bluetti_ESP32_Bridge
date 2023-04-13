@@ -95,11 +95,12 @@ void initBWifi(bool resetWifi){
   wifiManager.addParameter(&custom_ota_password);
   wifiManager.addParameter(&custom_bluetti_device);
   
+  
   wifiManager.setAPCallback([&](WiFiManager* wifiManager) {
 		Serial.printf("Entered config mode:ip=%s, ssid='%s'\n", 
                         WiFi.softAPIP().toString().c_str(), 
                         wifiManager->getConfigPortalSSID().c_str());
-                        #ifdef DISPLAY
+                        #ifdef DISPLAYSSD1306
                           wifisignal(2); //AP mode
                           wrDisp_IP(WiFi.softAPIP().toString().c_str());
                           wrDisp_Status("Setup Wifi");
@@ -124,7 +125,7 @@ void initBWifi(bool resetWifi){
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED) {
     // display will have blinking wifi signal until connected.
-    #ifdef DISPLAY
+    #ifdef DISPLAYSSD1306
       disp_setPrevStateIcon(0);
       wifisignal(0);
       delay(200);
@@ -143,7 +144,7 @@ void initBWifi(bool resetWifi){
   Serial.println(F(""));
   Serial.println(F("IP address: "));
   Serial.println(WiFi.localIP());
-  #ifdef DISPLAY
+  #ifdef DISPLAYSSD1306
     wrDisp_IP(WiFi.localIP().toString().c_str());
     disp_setWifiSignal(1, WiFi.RSSI());
   #endif
@@ -216,9 +217,11 @@ void handleWebserver() {
 
   if ((millis() - lastTimeWebUpdate) > MSG_VIEWER_REFRESH_CYCLE*1000) {
 
-    #ifdef DISPLAY
+    #ifdef DISPLAYSSD1306
       // update display
       disp_setWifiSignal(1,WiFi.RSSI());
+      disp_setBlueTooth(isBTconnected());
+      disp_setMqttStatus(isMQTTconnected());
     #endif
 
     // Send Events to the Web Server with current data

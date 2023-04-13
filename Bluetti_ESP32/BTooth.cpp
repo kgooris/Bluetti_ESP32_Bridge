@@ -6,6 +6,9 @@
 
 
 int pollTick = 0;
+BLEScan* pBLEScan;
+unsigned long prevTimerBTScan = 0;
+int counter = 0;
 
 struct command_handle {
   uint8_t page;
@@ -51,7 +54,7 @@ class BluettiAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
       BLEDevice::getScan()->stop();
       bluettiDevice = advertisedDevice;
       doConnect = true;
-      doScan = true;
+      doScan = false;
     }
   } 
 };
@@ -60,11 +63,14 @@ void initBluetooth(){
   BLEDevice::init("");
   BLEScan* pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new BluettiAdvertisedDeviceCallbacks());
-  pBLEScan->setInterval(1349);
-  pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
-  pBLEScan->start(5, false);
+// pBLEScan->setInterval(1349);
+ // pBLEScan->setWindow(449);
+  pBLEScan->setMaxResults(0);
+  //pBLEScan->start(5, false);
   
+  pBLEScan->setInterval(97); // How often the scan occurs / switches channels; in milliseconds,
+  pBLEScan->setWindow(37);  // How long to scan during the interval; in milliseconds.
   commandHandleQueue = xQueueCreate( 5, sizeof(bt_command_t ) );
   sendQueue = xQueueCreate( 5, sizeof(bt_command_t) );
 }
@@ -199,6 +205,8 @@ void handleBluetooth(){
   if (doConnect == true) {
     if (connectToServer()) {
       Serial.println(F("We are now connected to the Bluetti BLE Server."));
+
+      
     } else {
       Serial.println(F("We have failed to connect to the server; there is nothing more we will do."));
     }
@@ -241,8 +249,20 @@ void handleBluetooth(){
 
     handleBTCommandQueue();
     
-  }else if(doScan){
-    BLEDevice::getScan()->start(0);  
+  }else{
+
+    // check every 2 seconds only.
+    if (millis() - prevTimerBTScan >= 2000)
+    {
+      prevTimerBTScan = millis();
+      counter++;
+      if (pBLEScan->isScanning() == false)
+      {
+        Serial.println("Step before scan start...."+String(counter));
+           pBLEScan->start(1, false);
+        Serial.println("Step after scan start....");
+      }
+    }
   }
 }
 
