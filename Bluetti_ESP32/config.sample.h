@@ -3,6 +3,7 @@
 #include "Arduino.h"
 
 #define DEBUG                 1
+#define HA_DISCOVERY          1  // publish Home Assistant MQTT auto-discovery configs
 // Display config section, comment DISPLAYSSD1306 to disable display
 //#define DEBUGDISP 1
 //#define DISPLAYSSD1306  1

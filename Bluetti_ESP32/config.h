@@ -5,16 +5,16 @@
 #define DEBUG                 1
 // Display config section, comment DISPLAYSSD1306 to disable display
 //#define DEBUGDISP 1
-//#define DISPLAYSSD1306  1
+#define DISPLAYSSD1306  1
 #define DISPLAY_SCL_PORT 4
 #define DISPLAY_SDA_PORT 5
 //Uncomment to toggle display reset on start, required for displays like LoRa TTGO v1.0
 //#define DISPLAY_RST_PORT 16
-
+#define HA_DISCOVERY
 #define EEPROM_SALT 13374
 
 #define DEVICE_NAME "BLUETTI-MQTT"
-#define BLUETTI_TYPE AC300
+#define BLUETTI_TYPE AC200M
 
 #define BLUETOOTH_QUERY_MESSAGE_DELAY 3000
 #define BLUETOOTH_MAX_RETRIES_BEFORE_REBOOT 10

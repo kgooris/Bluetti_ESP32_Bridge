@@ -408,6 +408,81 @@ void publishDeviceStateStatus(){
  
 }
 
+// Home Assistant MQTT auto-discovery (retained config messages)
+static void publishHAEntity(const char* component, const String& field, const String& body){
+  ESPBluettiSettings settings = get_esp32_bluetti_settings();
+  String id = String(settings.bluetti_device_id);
+  id.replace(" ", "_");
+  String topic = "homeassistant/" + String(component) + "/bluetti_" + id + "/" + field + "/config";
+
+  String payload = "{\"name\":\"" + field + "\","
+    "\"unique_id\":\"bluetti_" + id + "_" + field + "\","
+    "\"availability_topic\":\"bluetti/" + String(settings.bluetti_device_id) + "/state/device_status\","
+    "\"availability_template\":\"{{ 'online' if value_json.BTconnected == 1 else 'offline' }}\","
+    "\"device\":{\"identifiers\":[\"bluetti_" + id + "\"],\"name\":\"Bluetti " + id + "\",\"manufacturer\":\"Bluetti\"}," + body + "}";
+
+  if (!client.publish(topic.c_str(), payload.c_str(), true)){
+    publishErrorCount++;
+  }
+  client.loop();
+}
+
+static String haSensorAttrs(const String& f){
+  if (f.endsWith("_percent") || f.endsWith("_percentage")) return ",\"device_class\":\"battery\",\"unit_of_measurement\":\"%\",\"state_class\":\"measurement\"";
+  if (f == "power_generation") return ",\"device_class\":\"energy\",\"unit_of_measurement\":\"kWh\",\"state_class\":\"total_increasing\"";
+  if (f.indexOf("power") >= 0 && !f.endsWith("_on")) return ",\"device_class\":\"power\",\"unit_of_measurement\":\"W\",\"state_class\":\"measurement\"";
+  if (f.indexOf("voltage") >= 0) return ",\"device_class\":\"voltage\",\"unit_of_measurement\":\"V\",\"state_class\":\"measurement\"";
+  if (f.indexOf("current") >= 0) return ",\"device_class\":\"current\",\"unit_of_measurement\":\"A\",\"state_class\":\"measurement\"";
+  if (f.indexOf("frequency") >= 0) return ",\"device_class\":\"frequency\",\"unit_of_measurement\":\"Hz\",\"state_class\":\"measurement\"";
+  return "";
+}
+
+void publishHAConfig(){
+  ESPBluettiSettings settings = get_esp32_bluetti_settings();
+  String base = "bluetti/" + String(settings.bluetti_device_id);
+
+  // state fields -> sensor / binary_sensor
+  for (int i=0; i< sizeof(bluetti_device_state)/sizeof(device_field_data_t); i++){
+    String f = map_field_name(bluetti_device_state[i].f_name);
+    if (f == "unknown") continue;
+    String st = "\"state_topic\":\"" + base + "/state/" + f + "\"";
+    switch (bluetti_device_state[i].f_type){
+      case BOOL_FIELD:
+        publishHAEntity("binary_sensor", f, st + ",\"payload_on\":\"1\",\"payload_off\":\"0\"");
+        break;
+      case UINT_FIELD:
+      case DECIMAL_FIELD:
+        publishHAEntity("sensor", f, st + haSensorAttrs(f));
+        break;
+      case STRING_FIELD:
+      case SN_FIELD:
+      case VERSION_FIELD:
+      case ENUM_FIELD:
+        publishHAEntity("sensor", f, st + ",\"entity_category\":\"diagnostic\"");
+        break;
+      default:
+        break;
+    }
+  }
+
+  // commands -> switch (on/off) or select (enums)
+  for (int i=0; i< sizeof(bluetti_device_command)/sizeof(device_field_data_t); i++){
+    String f = map_field_name(bluetti_device_command[i].f_name);
+    if (f == "unknown") continue;
+    String cmd = "\"command_topic\":\"" + base + "/command/" + f + "\"";
+    String st = "\"state_topic\":\"" + base + "/state/" + f + "\"";
+    if (bluetti_device_command[i].f_type == BOOL_FIELD){
+      publishHAEntity("switch", f, cmd + "," + st + ",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"state_on\":\"1\",\"state_off\":\"0\"");
+    } else if (f == "led_mode"){
+      publishHAEntity("select", f, cmd + "," + st + ",\"options\":[\"LED_LOW\",\"LED_HIGH\",\"LED_SOS\",\"LED_OFF\"]");
+    } else if (f == "eco_shutdown"){
+      publishHAEntity("select", f, cmd + "," + st + ",\"options\":[\"ONE_HOUR\",\"TWO_HOURS\",\"THREE_HOURS\",\"FOUR_HOURS\"]");
+    } else if (f == "charging_mode"){
+      publishHAEntity("select", f, cmd + "," + st + ",\"options\":[\"STANDARD\",\"SILENT\",\"TURBO\"]");
+    }
+  }
+}
+
 void initMQTT(){
 
     enum field_names f_name;
@@ -422,6 +497,7 @@ void initMQTT(){
     Serial.print(":");
     Serial.println(F(settings.mqtt_port));
     
+    client.setBufferSize(1024); // HA discovery payloads exceed the 256 byte default
     client.setServer(settings.mqtt_server, atoi(settings.mqtt_port));
     client.setCallback(callback);
 
@@ -444,6 +520,9 @@ void initMQTT(){
 
       publishDeviceState();
       publishDeviceStateStatus();
+#ifdef HA_DISCOVERY
+      publishHAConfig();
+#endif
     }
 
     

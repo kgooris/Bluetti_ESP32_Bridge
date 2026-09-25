@@ -11,6 +11,7 @@ Join the Discord Server https://discord.gg/fWDSBTCVmB
 * display support OLED 128x64 
   * tested ESP32 WROOM with display: https://github.com/LilyGO/TTGO-T2-ESP32
 * mqtt support
+* Home Assistant MQTT auto-discovery (no YAML needed, see [Home Assistant](#home-assistant))
 * support for BLUETTI power stations
   * AC300 (tested)
   * AC200 (tested)
@@ -40,6 +41,8 @@ Join the Discord Server https://discord.gg/fWDSBTCVmB
 
 Create a copy of config.sample.h and name it config.h
 Change at least the device type to fit your Bluetti device.
+
+`#define HA_DISCOVERY 1` enables Home Assistant auto-discovery (enabled in config.sample.h). Comment it out to disable. If you have an existing config.h, add this line to it.
 
 ### Compiling and Flashing to ESP32
 
@@ -118,13 +121,15 @@ Example ( ioBroker ):
 #### Commands
 Commands are subscribed from
 
-* /bluetti/<your_device_id>/command
+* bluetti/<your_device_id>/command/<field>
   * ac_output_on
   * dc_output_on
+  
+  Payload `ON`/`OFF` (or `1`/`0`). Which commands exist depends on the device type.
 
 #### State
 States are published to
-* /bluetti/<your_device_id>/state
+* bluetti/<your_device_id>/state/<field>
   * ac_output_on
   * dc_output_on
   * dc_input_power
@@ -136,6 +141,34 @@ States are published to
   * arm_version
   * power_generation
   * total_battery_percent
+
+### Home Assistant
+
+The bridge announces itself to Home Assistant through MQTT auto-discovery, so no manual YAML is needed.
+
+Requirements:
+* An MQTT broker that both Home Assistant and the ESP32 use
+* The Home Assistant MQTT integration with discovery enabled (default, prefix `homeassistant`)
+* `#define HA_DISCOVERY 1` in config.h
+
+How it works:
+* Every time the ESP32 connects to the MQTT broker it publishes retained discovery messages to `homeassistant/<type>/bluetti_<your_device_id>/<field>/config`.
+* All entities are grouped under one Home Assistant device named `Bluetti <your_device_id>`.
+* Entities are created from the state and command tables of the selected device type, so the list depends on `BLUETTI_TYPE`:
+  * Sensors for power (W), voltage (V), current (A), frequency (Hz), battery (%) and power generation (kWh)
+  * Binary sensors for on/off states (e.g. ac_output_on)
+  * Diagnostic sensors for serial number, firmware versions and device type
+  * Switches for commands with on/off (e.g. ac_output_on, dc_output_on)
+  * Selects for enum commands (led_mode, eco_shutdown, charging_mode) on devices that define them
+
+Usage:
+1. Flash the firmware and configure WiFi/MQTT as described above.
+2. In Home Assistant open Settings -> Devices & Services -> MQTT. The Bluetti device shows up automatically after the ESP32 has connected to the broker.
+3. Values are updated after each Bluetooth poll cycle, so it can take a few seconds (after a fresh start up to a minute) before the first values appear.
+
+Troubleshooting:
+* Check what is published with `mosquitto_sub -t 'homeassistant/#' -v`.
+* To remove the entities, disable `HA_DISCOVERY`, delete the device in Home Assistant and clear the retained topics (`mosquitto_pub -r -n -t <config topic>`).
 
 ## Display
 Config Display:
