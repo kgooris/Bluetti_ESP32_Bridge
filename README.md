@@ -42,7 +42,7 @@ Join the Discord Server https://discord.gg/fWDSBTCVmB
 Create a copy of config.sample.h and name it config.h
 Change at least the device type to fit your Bluetti device.
 
-`#define HA_DISCOVERY 1` enables Home Assistant auto-discovery (enabled in config.sample.h). Comment it out to disable. If you have an existing config.h, add this line to it.
+The display and Home Assistant auto-discovery are not set in config.h anymore, you choose them in the WiFi setup portal (see Usage). The display pins are still set in config.h.
 
 ### Compiling and Flashing to ESP32
 
@@ -107,7 +107,11 @@ Select "Configure WiFi"
 
 Configure your WiFi and set the address of your MQTT server and enter the Bluetooth ID of your
 Bluetti Device. Optionally you can specify username and password to protect the web OTA interface.
-You can use a mobile phone and/or the Bluetti APP for finding the correct Bluetooth ID of your device.
+When the portal opens, the ESP32 scans for 5 seconds for Bluetti devices nearby. Switch on your power station first, then pick it from the "Detected Bluetti devices" list (this overrides the ID typed above). If nothing is found, you can still type the ID by hand, using a mobile phone and/or the Bluetti APP to find the correct Bluetooth ID of your device.
+
+The portal also has these options:
+* OLED display (SSD1306): enabled by default. If no display is found on the I2C bus, it is skipped automatically. Choose "Disabled" to never use it. Changing it reboots the ESP32.
+* Home Assistant auto-discovery: enabled by default, see [Home Assistant](#home-assistant).
 
 ![Wifi Manager start menu](doc/images/wifi_setup.png)
 
@@ -149,7 +153,7 @@ The bridge announces itself to Home Assistant through MQTT auto-discovery, so no
 Requirements:
 * An MQTT broker that both Home Assistant and the ESP32 use
 * The Home Assistant MQTT integration with discovery enabled (default, prefix `homeassistant`)
-* `#define HA_DISCOVERY 1` in config.h
+* Home Assistant auto-discovery enabled in the WiFi setup portal (default)
 
 How it works:
 * Every time the ESP32 connects to the MQTT broker it publishes retained discovery messages to `homeassistant/<type>/bluetti_<your_device_id>/<field>/config`.
@@ -168,13 +172,13 @@ Usage:
 
 Troubleshooting:
 * Check what is published with `mosquitto_sub -t 'homeassistant/#' -v`.
-* To remove the entities, disable `HA_DISCOVERY`, delete the device in Home Assistant and clear the retained topics (`mosquitto_pub -r -n -t <config topic>`).
+* To remove the entities, disable Home Assistant auto-discovery in the WiFi setup portal, delete the device in Home Assistant and clear the retained topics (`mosquitto_pub -r -n -t <config topic>`).
 
 ## Display
 Config Display:
-* By default, display is disabled. 
-* Configurations (customize of file Bluetti_ESP32/config.h): 
-  * Enable display: uncomment #define DISPLAYSSD1306 1
+* The display is enabled by default and skipped automatically when no display is detected at I2C address 0x3C.
+* Disable it in the WiFi setup portal if you never want to use it.
+* Pin settings (customize of file Bluetti_ESP32/config.h):
   * Enable reset of display on init: uncomment DISPLAY_RST_PORT
     * Known needed for LoRa TTGO v1.0
   * set SCL & SDA ports: default ports are set to SCL=4 & SDA5, to change update DISPLAY_SCL_PORT and DISPLAY_SDA_PORT 

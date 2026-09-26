@@ -3,6 +3,7 @@
 
 // for setup only
 void initDisplay();
+bool isDisplayActive(); // true only when a display was found and initialised
 void wrDisp_IP(String strIP="NoConf");
 void wrDisp_Running();
 void wrDisp_Status(String strStatus="boot..");

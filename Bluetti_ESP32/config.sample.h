@@ -3,10 +3,8 @@
 #include "Arduino.h"
 
 #define DEBUG                 1
-#define HA_DISCOVERY          1  // publish Home Assistant MQTT auto-discovery configs
-// Display config section, comment DISPLAYSSD1306 to disable display
+// Display config section. The display is enabled by default and skipped when none is found, it can be switched off in the WiFi setup portal
 //#define DEBUGDISP 1
-//#define DISPLAYSSD1306  1
 #define DISPLAY_SCL_PORT 4
 #define DISPLAY_SDA_PORT 5
 //Uncomment to toggle display reset on start, required for displays like LoRa TTGO v1.0

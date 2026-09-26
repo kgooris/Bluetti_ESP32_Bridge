@@ -547,9 +547,9 @@ void initMQTT(){
       publishAvailability();
       publishDeviceState();
       publishDeviceStateStatus();
-#ifdef HA_DISCOVERY
-      publishHAConfig();
-#endif
+      if (isHaDiscoveryEnabled()){
+        publishHAConfig();
+      }
     }
 
     
@@ -577,9 +577,7 @@ void handleMQTT(){
       {
         previousMqttReconnect = millis();
         Serial.println(F("[MQTT] lost connection, try to reconnect"));
-        #ifdef DISPLAYSSD1306
-            disp_setMqttStatus(false);
-        #endif
+        disp_setMqttStatus(false);
         client.disconnect();
         lastMQTTMessage=0;
         previousDeviceStatePublish=0;

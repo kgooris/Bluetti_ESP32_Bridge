@@ -8,6 +8,8 @@
 #include <ESPAsyncWebServer.h> // https://github.com/me-no-dev/ESPAsyncWebServer/archive/master.zip
 #include <AsyncTCP.h> // https://github.com/me-no-dev/AsyncTCP/archive/master.zip
 #include <ESPmDNS.h>
+#include <list>
+#include <vector>
 #include <ElegantOTA.h> // https://github.com/ayushsharma82/ElegantOTA/archive/master.zip
 #include "display.h"
 
@@ -45,6 +47,43 @@ void eeprom_read(){
   EEPROM.end();
 }
 
+void loadBluettiSettings(){
+  eeprom_read();
+}
+
+// stored value: 0 = not set (use default), 1 = disabled, 2 = enabled
+static bool flagEnabled(uint8_t stored, bool defaultValue){
+  if (wifiConfig.salt != EEPROM_SALT) return defaultValue;
+  if (stored == 1) return false;
+  if (stored == 2) return true;
+  return defaultValue;
+}
+
+// enabled by default, initDisplay() skips it when no display is found on the I2C bus
+bool isDisplayEnabled(){
+  return flagEnabled(wifiConfig.display_enabled, true);
+}
+
+bool isHaDiscoveryEnabled(){
+  return flagEnabled(wifiConfig.ha_discovery, true);
+}
+
+static String selectOption(const char* value, const char* label, bool selected){
+  return String("<option value='") + value + "'" + (selected ? " selected" : "") + ">" + label + "</option>";
+}
+
+// checkbox that switches the password input with the given id between hidden and visible
+static String showPasswordHtml(const char* inputId){
+  return String("<br/><input type='checkbox' onclick=\"document.getElementById('") + inputId +
+         "').type=this.checked?'text':'password'\"> Show password";
+}
+
+// section title on its own line with a line below it. WiFiManager already draws a line above the
+// first custom parameter, so the first section does not need extra space or a line above it.
+static String sectionHtml(const char* title, bool first = false){
+  return String("<div style='margin:") + (first ? "0" : "26px") + " 0 4px'><b>" + title + "</b></div><hr style='margin:0 0 10px'>";
+}
+
 void eeprom_saveconfig(){
   Serial.println(F("Saving Values to EEPROM"));
   EEPROM.begin(512);
@@ -69,7 +108,6 @@ void initBWifi(bool resetWifi){
   WiFiManagerParameter custom_mqtt_password("password", "MQTT Password", "", 40, "type=password");
   WiFiManagerParameter custom_ota_username("ota_username", "OTA Username", "", 40);
   WiFiManagerParameter custom_ota_password("ota_password", "OTA Password", "", 40, "type=password");
-  WiFiManagerParameter custom_bluetti_device("bluetti", "Bluetti Bluetooth ID", bluetti_device_id, 40);
 
   WiFiManager wifiManager;
 
@@ -86,27 +124,116 @@ void initBWifi(bool resetWifi){
     wifiManager.setConfigPortalTimeout(300);
   }
 
+  // saved Bluetooth ID, empty when nothing (or only the default placeholder) is stored
+  String savedBluettiId = (wifiConfig.salt == EEPROM_SALT) ? String(wifiConfig.bluetti_device_id) : String("");
+  if (savedBluettiId == "Bluetti Blutetooth Id" || savedBluettiId.startsWith("e.g.")){
+    savedBluettiId = "";
+  }
+  // only shown when "Custom entry" is chosen in the device list, the label is part of the HTML around it
+  WiFiManagerParameter custom_bluetti_device("bluetti", "Bluetti Bluetooth ID", savedBluettiId.c_str(), 40, "placeholder='e.g. AC2001234567890'", WFM_NO_LABEL);
+
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
-  wifiManager.addParameter(&custom_mqtt_server);
-  wifiManager.addParameter(&custom_mqtt_port);
-  wifiManager.addParameter(&custom_mqtt_username);
-  wifiManager.addParameter(&custom_mqtt_password);
-  wifiManager.addParameter(&custom_ota_username);
-  wifiManager.addParameter(&custom_ota_password);
-  wifiManager.addParameter(&custom_bluetti_device);
-  
+  // The portal page is built in the AP callback, after the Bluetooth scan, so all parameters are added
+  // there in display order. Parameters with custom HTML only are used for section headers and widgets.
+  String selectedBluetti, selectedDisplay, selectedHa;
+  std::list<String> htmlStore; // keeps the HTML of the custom parameters alive while the portal runs
+  std::vector<WiFiManagerParameter*> htmlParams;
+
+  wifiManager.setSaveParamsCallback([&]() {
+    selectedBluetti = wifiManager.server->arg("bluetti_sel");
+    selectedDisplay = wifiManager.server->arg("display_sel");
+    selectedHa = wifiManager.server->arg("ha_sel");
+  });
+
   wifiManager.setAPCallback([&](WiFiManager* wifiManager) {
-		Serial.printf("Entered config mode:ip=%s, ssid='%s'\n", 
-                        WiFi.softAPIP().toString().c_str(), 
+		Serial.printf("Entered config mode:ip=%s, ssid='%s'\n",
+                        WiFi.softAPIP().toString().c_str(),
                         wifiManager->getConfigPortalSSID().c_str());
-                        #ifdef DISPLAYSSD1306
-                          wrDisp_wifisignal(2); //AP mode
-                          wrDisp_IP(WiFi.softAPIP().toString().c_str());
-                          wrDisp_Status("Setup Wifi");
-                        #endif
+    wrDisp_wifisignal(2); //AP mode
+    wrDisp_IP(WiFi.softAPIP().toString().c_str());
+    wrDisp_Status("BLE scan");
+
+    // look for Bluetti devices nearby, pick one from the list instead of typing the Bluetooth ID
+    std::vector<String> found = scanBluettiDevices(5);
+    Serial.printf("[BLE] %d Bluetti device(s) found during setup scan\n", (int)found.size());
+    wrDisp_Status("Setup Wifi");
+
+    auto addHtml = [&](const String& html) {
+      htmlStore.push_back(html);
+      WiFiManagerParameter* param = new WiFiManagerParameter(htmlStore.back().c_str());
+      htmlParams.push_back(param);
+      wifiManager->addParameter(param);
+    };
+
+    // MQTT
+    addHtml(sectionHtml("MQTT", true));
+    wifiManager->addParameter(&custom_mqtt_server);
+    wifiManager->addParameter(&custom_mqtt_port);
+    wifiManager->addParameter(&custom_mqtt_username);
+    wifiManager->addParameter(&custom_mqtt_password);
+    addHtml(showPasswordHtml("password"));
+
+    // OTA (web update login)
+    addHtml(sectionHtml("Web update (OTA) login"));
+    wifiManager->addParameter(&custom_ota_username);
+    wifiManager->addParameter(&custom_ota_password);
+    addHtml(showPasswordHtml("ota_password"));
+
+    // Bluetti device: dropdown with the devices found, "Custom entry" shows the ID text box
+    bool idFound = false;
+    for (size_t i = 0; i < found.size(); i++){
+      if (found[i] == savedBluettiId) idFound = true;
+    }
+    bool customSelected = found.empty() || (!idFound && savedBluettiId.length() > 0);
+
+    String bluettiHtml = sectionHtml("Bluetti device");
+    if (found.empty()){
+      bluettiHtml += "<small>No Bluetti device found nearby. Switch it on and reboot this device, or use a custom entry.</small><br/>";
+    }
+    bluettiHtml += "<label for='bluetti_sel'>Bluetooth device</label>"
+                   "<select id='bluetti_sel' name='bluetti_sel' onchange=\"document.getElementById('bluetti_custom').style.display=this.value=='__custom__'?'block':'none'\">";
+    for (size_t i = 0; i < found.size(); i++){
+      bool selected = !customSelected && (idFound ? found[i] == savedBluettiId : i == 0);
+      bluettiHtml += selectOption(found[i].c_str(), found[i].c_str(), selected);
+    }
+    bluettiHtml += selectOption("__custom__", "Custom entry...", customSelected);
+    bluettiHtml += "</select>";
+    bluettiHtml += String("<div id='bluetti_custom' style='display:") + (customSelected ? "block" : "none") +
+                   "'><label for='bluetti'>Bluetooth ID</label>";
+    addHtml(bluettiHtml);
+    wifiManager->addParameter(&custom_bluetti_device);
+    addHtml("</div>");
+
+    // other settings
+    String otherHtml = sectionHtml("Other settings");
+    otherHtml += "<label for='display_sel'>OLED display (SSD1306, skipped when none is found), applied after reboot</label><select id='display_sel' name='display_sel'>";
+    otherHtml += selectOption("2", "Enabled", isDisplayEnabled());
+    otherHtml += selectOption("1", "Disabled", !isDisplayEnabled());
+    otherHtml += "</select>";
+    otherHtml += "<br/><label for='ha_sel'>Home Assistant auto-discovery</label><select id='ha_sel' name='ha_sel'>";
+    otherHtml += selectOption("2", "Enabled", isHaDiscoveryEnabled());
+    otherHtml += selectOption("1", "Disabled", !isHaDiscoveryEnabled());
+    otherHtml += "</select>";
+    addHtml(otherHtml);
 	});
   
+  // several access points can share one SSID: scan all channels and connect to the strongest one,
+  // the default (fast scan) takes the first one found
+  WiFi.setScanMethod(WIFI_ALL_CHANNEL_SCAN);
+  WiFi.setSortMethod(WIFI_CONNECT_AP_BY_SIGNAL);
+
+  // A normal boot reconnects with WiFi.begin() without arguments. That reuses the config already
+  // held by the WiFi driver and ignores the two calls above, so patch that config directly.
+  WiFi.mode(WIFI_STA);
+  wifi_config_t staConfig;
+  if (esp_wifi_get_config(WIFI_IF_STA, &staConfig) == ESP_OK) {
+    staConfig.sta.scan_method = WIFI_ALL_CHANNEL_SCAN;
+    staConfig.sta.sort_method = WIFI_CONNECT_AP_BY_SIGNAL;
+    staConfig.sta.bssid_set = 0; // never pin to one access point
+    esp_wifi_set_config(WIFI_IF_STA, &staConfig);
+  }
+
   if (!wifiManager.autoConnect("Bluetti_ESP32")) {
     ESP.restart();
   }
@@ -119,35 +246,55 @@ void initBWifi(bool resetWifi){
      strlcpy(wifiConfig.ota_username, custom_ota_username.getValue(), 40);
      strlcpy(wifiConfig.ota_password, custom_ota_password.getValue(), 40);
      strlcpy(wifiConfig.bluetti_device_id, custom_bluetti_device.getValue(), 40);
+     if (selectedBluetti.length() > 0 && selectedBluetti != "__custom__"){
+       strlcpy(wifiConfig.bluetti_device_id, selectedBluetti.c_str(), 40);
+     }
+     if (selectedDisplay == "1" || selectedDisplay == "2"){
+       wifiConfig.display_enabled = selectedDisplay.toInt();
+     }
+     if (selectedHa == "1" || selectedHa == "2"){
+       wifiConfig.ha_discovery = selectedHa.toInt();
+     }
      eeprom_saveconfig();
+  }
+
+  for (size_t i = 0; i < htmlParams.size(); i++){
+    delete htmlParams[i];
+  }
+
+  // Everything is saved. Reboot after using the setup portal: the portal web server still holds port 80
+  // (the async web server below could not bind to it) and a changed display setting is applied in setup().
+  if (shouldSaveConfig){
+    Serial.println(F("Settings saved, rebooting"));
+    delay(500);
+    ESP.restart();
   }
 
   // Wait for connection
   while (WiFi.status() != WL_CONNECTED) {
     // display will have blinking wifi signal until connected.
-    #ifdef DISPLAYSSD1306
+    if (isDisplayActive()){
       disp_setPrevStateIcon(0);
       wrDisp_wifisignal(0);
       delay(200);
       Serial.print(".");
       disp_setPrevStateIcon(1);
       wrDisp_wifisignal(0);
-    #else
+    } else {
       delay(500);
       Serial.print(".");
-    #endif
+    }
 
   }
   
   WiFi.setAutoReconnect(true);
+  Serial.printf("WiFi connected to %s (BSSID %s, RSSI %d dBm)\n", WiFi.SSID().c_str(), WiFi.BSSIDstr().c_str(), WiFi.RSSI());
 
   Serial.println(F(""));
   Serial.println(F("IP address: "));
   Serial.println(WiFi.localIP());
-  #ifdef DISPLAYSSD1306
-    wrDisp_IP(WiFi.localIP().toString().c_str());
-    disp_setWifiSignal(1, WiFi.RSSI());
-  #endif
+  wrDisp_IP(WiFi.localIP().toString().c_str());
+  disp_setWifiSignal(1, WiFi.RSSI());
   if (MDNS.begin(DEVICE_NAME)) {
     Serial.println(F("MDNS responder started"));
   }
@@ -212,32 +359,26 @@ void handleWebserver() {
     // check wifi status every MSG_VIEWER_REFRESH_CYCLE and set display 
     if (WiFi.status() != WL_CONNECTED) {
       Serial.println(F("WiFi is disconnected, try to reconnect..."));
-      #ifdef DISPLAYSSD1306
-        disp_setWifiMode(0);
-        disp_setStatus("Wifi err..");
-      #endif
+      disp_setWifiMode(0);
+      disp_setStatus("Wifi err..");
       WiFi.disconnect();
       WiFi.reconnect();
       AddtoMsgView(String(millis()) + ": WLAN ERROR! try to reconnect");
       wifiReconnectCounter++;
       //delay(1000); no delay as we only check every 5 seconds. Removing 1 second blocking of the program in the loop.
     } else {
-      #ifdef DISPLAYSSD1306
-        disp_setWifiSignal(1,WiFi.RSSI());
-        if (wifiReconnectCounter > 0)
-        {
-          //only update display ones after wifi is recovered.
-          disp_setStatus("Running!");
-          wifiReconnectCounter = 0;
-        }
-      #endif
+      disp_setWifiSignal(1,WiFi.RSSI());
+      if (wifiReconnectCounter > 0)
+      {
+        //only update display ones after wifi is recovered.
+        disp_setStatus("Running!");
+        wifiReconnectCounter = 0;
+      }
     }
 
-    #ifdef DISPLAYSSD1306
-      // update display
-      disp_setBlueTooth(isBTconnected());
-      disp_setMqttStatus(isMQTTconnected());
-    #endif
+    // update display
+    disp_setBlueTooth(isBTconnected());
+    disp_setMqttStatus(isMQTTconnected());
 
     // Send Events to the Web Server with current data
     events.send("ping",NULL,millis());

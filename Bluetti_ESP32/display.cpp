@@ -37,9 +37,17 @@ byte prevBTStateIcons = 0;
 byte prevMQStateIcon = 0;
 
 
+// set by initDisplay(), all display functions are no-ops until then (display disabled in setup)
+bool dispEnabled = false;
+
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, -1);
+
+bool isDisplayActive()
+{
+    return dispEnabled;
+}
 
 void initDisplay()
 {
@@ -54,12 +62,20 @@ void initDisplay()
         delay(20);
     #endif
     Wire.begin(DISPLAY_SDA_PORT, DISPLAY_SCL_PORT);
+    // begin() does not check that a display answers, so probe the I2C address first
+    Wire.beginTransmission(0x3C);
+    if (Wire.endTransmission() != 0)
+    {
+        Serial.println(F("display: no SSD1306 found on I2C, running without display"));
+        Wire.end();
+        return;
+    }
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C, false, false))
     {
-        Serial.println(F("display: SSD1306 allocation failed"));
-        for (;;)
-            ;
+        Serial.println(F("display: SSD1306 not found, display disabled"));
+        return;
     }
+    dispEnabled = true;
     display.clearDisplay();
     display.setTextSize(1); // Draw 2X-scale text
     display.setTextColor(BLACK,WHITE);
@@ -75,6 +91,7 @@ void initDisplay()
 }
 void handleDisplay()
 {
+    if (!dispEnabled) return;
     // progress bar
     if (enableProgressbar == true)
     {
@@ -197,6 +214,7 @@ void handleDisplay()
 }
 void wrDisp_IP(String strIP)
 {
+    if (!dispEnabled) return;
     display.fillRect(0,14,114,8,0);
     display.setTextColor(WHITE,BLACK);
     display.setCursor(0, 14);
@@ -205,6 +223,7 @@ void wrDisp_IP(String strIP)
 }
 void wrDisp_Running()
 {
+    if (!dispEnabled) return;
     display.fillRect(0,22,114,8,0);
     display.setTextColor(WHITE,BLACK);
     display.setCursor(0, 22);
@@ -231,6 +250,7 @@ void wrDisp_Running()
 }
 void wrDisp_Status(String strStatus)
 {
+    if (!dispEnabled) return;
     display.fillRect(0,30,114,8,0);
     display.setTextColor(WHITE,BLACK);
     display.setCursor(0, 30);
@@ -239,6 +259,7 @@ void wrDisp_Status(String strStatus)
 }
 void wrDisp_mqttConnected(bool blMqttConnected)
 {
+    if (!dispEnabled) return;
     display.fillRect(115, 136, 13, 13, 0);
     display.display();
 
@@ -266,6 +287,7 @@ void wrDisp_mqttConnected(bool blMqttConnected)
 }
 void wrDisp_blueToothSignal(bool blConnected)
 {
+    if (!dispEnabled) return;
     display.fillRect(115, 18, 13, 13, 0);
     display.display();
     if (blConnected == true)
@@ -315,10 +337,12 @@ void wrDisp_blueToothSignal(bool blConnected)
 }
 void wrDisp_wifisignal_rewrite_static()
 {
+    if (!dispEnabled) return;
     wrDisp_wifisignal(byteWifiMode,intWifiSignal);
 }
 void wrDisp_wifisignal(int intMode, int intSignal)
 {
+    if (!dispEnabled) return;
     // intMode:
     // 0, not connected
     // 1, connected
@@ -478,16 +502,19 @@ void wrDisp_wifisignal(int intMode, int intSignal)
 }
 void disp_setWifiSignal(int extWifMode, int extSignal)
 {
+    if (!dispEnabled) return;
     intWifiSignal = extSignal;
     byteWifiMode = extWifMode;
     wrDisp_wifisignal(extWifMode,extSignal);
 }
 void disp_setWifiMode(byte wMode)
 {
+    if (!dispEnabled) return;
     byteWifiMode = wMode;
 }
 void disp_setIP(String strIP)
 {
+    if (!dispEnabled) return;
     if (strIP != strdispIP)
     {
         wrDisp_Status(strIP);
@@ -496,6 +523,7 @@ void disp_setIP(String strIP)
 }
 void disp_setStatus(String strStatus)
 {
+    if (!dispEnabled) return;
     if (strStatus != strdispStatus)
     {
         wrDisp_Status(strStatus);
@@ -504,22 +532,27 @@ void disp_setStatus(String strStatus)
 }
 void disp_setBlueTooth(bool boolBtConn)
 {
+    if (!dispEnabled) return;
     btConnected = boolBtConn;
 }
 void disp_setMqttStatus(bool blMqttconnected)
 {
+    if (!dispEnabled) return;
     mqConnected = blMqttconnected;
 }
 void disp_setPrevStateIcon(byte bytePrevState)
 {
+    if (!dispEnabled) return;
     prevStateIcons = bytePrevState;
 }
 void disp_setBTPrevStateIcon(byte bytePrevState)
 {
+    if (!dispEnabled) return;
     prevBTStateIcons = bytePrevState;
 }
 void drawProgressbar(int x,int y, int width,int height, int progress)
 {
+    if (!dispEnabled) return;
 
    // clear old data
    //display.drawRect(x, y, width, height, BLACK);

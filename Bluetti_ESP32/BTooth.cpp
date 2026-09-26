@@ -22,17 +22,13 @@ unsigned long lastBTMessage = 0;
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
     Serial.println(F("BLE - onConnect"));
-     #ifdef DISPLAYSSD1306
       disp_setBlueTooth(true);
-     #endif
   }
 
   void onDisconnect(BLEClient* pclient) {
     connected = false;
     Serial.println(F("BLE - onDisconnect"));
-    #ifdef DISPLAYSSD1306
       disp_setBlueTooth(false);
-    #endif
     #ifdef RELAISMODE
       #ifdef DEBUG
         Serial.println(F("deactivate relais contact"));
@@ -63,6 +59,31 @@ class BluettiAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
     }
   } 
 };
+
+std::vector<String> scanBluettiDevices(uint32_t seconds){
+  std::vector<String> names;
+  BLEDevice::init("");
+  BLEScan* pBLEScan = BLEDevice::getScan();
+  pBLEScan->setInterval(1349);
+  pBLEScan->setWindow(449);
+  pBLEScan->setActiveScan(true);
+  NimBLEScanResults results = pBLEScan->start(seconds, false);
+  for (int i = 0; i < results.getCount() && names.size() < 8; i++){
+    NimBLEAdvertisedDevice device = results.getDevice(i);
+    if (device.haveServiceUUID() && device.isAdvertisingService(serviceUUID)){
+      String name = String(device.getName().c_str());
+      bool known = false;
+      for (size_t j = 0; j < names.size(); j++){
+        if (names[j] == name) known = true;
+      }
+      if (name.length() > 0 && !known){
+        names.push_back(name);
+      }
+    }
+  }
+  pBLEScan->clearResults();
+  return names;
+}
 
 void initBluetooth(){
   BLEDevice::init("");
