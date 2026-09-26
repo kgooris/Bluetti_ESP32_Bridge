@@ -44,7 +44,7 @@ jobs:
           export ARDUINO_LIBRARY_ENABLE_UNSAFE_INSTALL=true && arduino-cli lib install --git-url https://github.com/me-no-dev/AsyncTCP.git
           export ARDUINO_LIBRARY_ENABLE_UNSAFE_INSTALL=true && arduino-cli lib install --git-url https://github.com/me-no-dev/ESPAsyncWebServer.git
           export ARDUINO_LIBRARY_ENABLE_UNSAFE_INSTALL=true && arduino-cli lib install --git-url https://github.com/h2zero/NimBLE-Arduino.git
-          arduino-cli lib install AsyncElegantOTA
+          arduino-cli lib install ElegantOTA
           arduino-cli lib install "Adafruit SSD1306"
           arduino-cli lib install "Adafruit GFX Library"
           arduino-cli lib install "Adafruit BusIO"
@@ -52,4 +52,4 @@ jobs:
       - name: 🔨 Build Firmware
         run: |
             cd Bluetti_ESP32
-            arduino-cli compile --fqbn esp32:esp32:esp32 Bluetti_ESP32.ino
+            arduino-cli compile --fqbn esp32:esp32:esp32 --build-property "compiler.cpp.extra_flags=-DELEGANTOTA_USE_ASYNC_WEBSERVER=1" Bluetti_ESP32.ino
