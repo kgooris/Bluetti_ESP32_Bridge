@@ -164,7 +164,7 @@ How it works:
 Usage:
 1. Flash the firmware and configure WiFi/MQTT as described above.
 2. In Home Assistant open Settings -> Devices & Services -> MQTT. The Bluetti device shows up automatically after the ESP32 has connected to the broker.
-3. Values are updated after each Bluetooth poll cycle, so it can take a few seconds (after a fresh start up to a minute) before the first values appear.
+3. Entities are available as soon as the ESP32 is connected to the MQTT broker and the Bluetooth link to the power station is up (topic `bluetti/<your_device_id>/state/availability`, `online`/`offline`, retained). It goes `offline` when Bluetooth drops or when the ESP32 loses the MQTT connection. Values are updated after each Bluetooth poll cycle, so the first values appear within about 15 seconds.
 
 Troubleshooting:
 * Check what is published with `mosquitto_sub -t 'homeassistant/#' -v`.

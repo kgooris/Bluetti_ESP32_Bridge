@@ -16,6 +16,21 @@ unsigned long lastMQTTMessage = 0;
 unsigned long previousDeviceStatePublish = 0;
 unsigned long previousDeviceStateStatusPublish = 0;
 unsigned long previousMqttReconnect = 0;
+int lastAvailabilityBT = -1; // last published Bluetooth state, -1 = nothing published yet
+
+String availabilityTopic(){
+  ESPBluettiSettings settings = get_esp32_bluetti_settings();
+  return "bluetti/" + String(settings.bluetti_device_id) + "/state/availability";
+}
+
+// "online" only when both MQTT and Bluetooth are up. The last will sets "offline" when MQTT drops.
+void publishAvailability(){
+  bool bt = isBTconnected();
+  if (!client.publish(availabilityTopic().c_str(), bt ? "online" : "offline", true)){
+    publishErrorCount++;
+  }
+  lastAvailabilityBT = bt ? 1 : 0;
+}
 
 String map_field_name(enum field_names f_name){
    switch(f_name) {
@@ -298,6 +313,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   command.prefix = 0x01;
   command.field_update_cmd = 0x06;
 
+  int matched = -1;
   for (int i=0; i< sizeof(bluetti_device_command)/sizeof(device_field_data_t); i++){
       if (topic_path.indexOf(map_field_name(bluetti_device_command[i].f_name)) > -1){
             command.page = bluetti_device_command[i].f_page;
@@ -305,7 +321,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
             
 			      String current_name = map_field_name(bluetti_device_command[i].f_name);
             strPayload = map_command_value(current_name,strPayload);
+            matched = i;
     }
+  }
+  if (matched < 0){
+    Serial.println(F("[MQTT] Command topic not supported by this device, ignoring"));
+    return;
   }
   Serial.print(" Payload - switched: ");
   Serial.println(strPayload);
@@ -315,6 +336,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   lastMQTTMessage = millis();
   
   sendBTCommand(command);
+
+  // The real state is only read back on the next poll cycle (up to ~15 s). Publish the expected
+  // state right away, otherwise Home Assistant flips the switch back until the poll catches up.
+  if (bluetti_device_command[matched].f_type == BOOL_FIELD){
+    publishTopic(bluetti_device_command[matched].f_name, strPayload.toInt() ? "1" : "0");
+  }
 }
 
 void subscribeTopic(enum field_names field_name) {
@@ -417,8 +444,7 @@ static void publishHAEntity(const char* component, const String& field, const St
 
   String payload = "{\"name\":\"" + field + "\","
     "\"unique_id\":\"bluetti_" + id + "_" + field + "\","
-    "\"availability_topic\":\"bluetti/" + String(settings.bluetti_device_id) + "/state/device_status\","
-    "\"availability_template\":\"{{ 'online' if value_json.BTconnected == 1 else 'offline' }}\","
+    "\"availability_topic\":\"" + availabilityTopic() + "\","
     "\"device\":{\"identifiers\":[\"bluetti_" + id + "\"],\"name\":\"Bluetti " + id + "\",\"manufacturer\":\"Bluetti\"}," + body + "}";
 
   if (!client.publish(topic.c_str(), payload.c_str(), true)){
@@ -504,9 +530,9 @@ void initMQTT(){
     bool connect_result;
     const char connect_id[] = "Bluetti_ESP32";
     if (settings.mqtt_username) {
-        connect_result = client.connect(connect_id, settings.mqtt_username, settings.mqtt_password);
+        connect_result = client.connect(connect_id, settings.mqtt_username, settings.mqtt_password, availabilityTopic().c_str(), 0, true, "offline");
     } else {
-        connect_result = client.connect(connect_id);
+        connect_result = client.connect(connect_id, NULL, NULL, availabilityTopic().c_str(), 0, true, "offline");
     }
     
     if (connect_result) {
@@ -518,6 +544,7 @@ void initMQTT(){
         subscribeTopic(bluetti_device_command[i].f_name);
       }
 
+      publishAvailability();
       publishDeviceState();
       publishDeviceStateStatus();
 #ifdef HA_DISCOVERY
@@ -563,6 +590,12 @@ void handleMQTT(){
       }
     }
     
+    // publish availability and device status as soon as the Bluetooth state changes
+    if (client.connected() && lastAvailabilityBT != (isBTconnected() ? 1 : 0)){
+      publishAvailability();
+      publishDeviceStateStatus();
+    }
+
     client.loop();
 }
 
