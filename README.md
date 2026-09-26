@@ -40,7 +40,7 @@ Join the Discord Server https://discord.gg/fWDSBTCVmB
 ### Configuration
 
 Create a copy of config.sample.h and name it config.h
-Change at least the device type to fit your Bluetti device.
+The power station model is chosen in the WiFi setup portal (by default it is detected from the Bluetooth name of your device), `BLUETTI_TYPE` in config.h is only the fallback when nothing else matches.
 
 The display and Home Assistant auto-discovery are not set in config.h anymore, you choose them in the WiFi setup portal (see Usage). The display pins are still set in config.h.
 
@@ -64,7 +64,7 @@ Change the partition scheme with Tools -> Partition Scheme to
 
 This setting is required because the Bluetooth stack already uses a lot of the ESP32 memory.
 
-Optional: Do changes in config.h file. The device can be set by changing 'BLUETTI_TYPE'.
+Optional: Do changes in config.h file. The model is selected in the WiFi setup portal, 'BLUETTI_TYPE' is only the fallback.
 
 Finally upload the Sketch to your ESP32.
 
@@ -103,13 +103,15 @@ open 192.168.4.1 in your local webbrowser.
 
 Select "Configure WiFi"
 
-![Wifi Manager start menu](doc/images/wifi_manager.png)
+![Wifi Manager start menu](doc/images/wifi_manager1.jpg)
+![Wifi Manager start menu](doc/images/wifi_manager2.jpg)
 
 Configure your WiFi and set the address of your MQTT server and enter the Bluetooth ID of your
 Bluetti Device. Optionally you can specify username and password to protect the web OTA interface.
 When the portal opens, the ESP32 scans for 5 seconds for Bluetti devices nearby. Switch on your power station first, then pick it from the "Detected Bluetti devices" list (this overrides the ID typed above). If nothing is found, you can still type the ID by hand, using a mobile phone and/or the Bluetti APP to find the correct Bluetooth ID of your device.
 
 The portal also has these options:
+* Power station model: "Auto-detect from the Bluetooth name" (default, e.g. `AC200M...` selects the AC200M) or one of the supported models (AC300, AC200M, EP500, EP500P, EB3A, AC500, EP600). Choose one by hand if the name of your device is not recognised. The model used is printed in the serial log at boot (`[Device] Power station model ...`).
 * OLED display (SSD1306): enabled by default. If no display is found on the I2C bus, it is skipped automatically. Choose "Disabled" to never use it. Changing it reboots the ESP32.
 * Home Assistant auto-discovery: enabled by default, see [Home Assistant](#home-assistant).
 
@@ -158,7 +160,7 @@ Requirements:
 How it works:
 * Every time the ESP32 connects to the MQTT broker it publishes retained discovery messages to `homeassistant/<type>/bluetti_<your_device_id>/<field>/config`.
 * All entities are grouped under one Home Assistant device named `Bluetti <your_device_id>`.
-* Entities are created from the state and command tables of the selected device type, so the list depends on `BLUETTI_TYPE`:
+* Entities are created from the state and command tables of the selected device type, so the list depends on the selected model:
   * Sensors for power (W), voltage (V), current (A), frequency (Hz), battery (%) and power generation (kWh)
   * Binary sensors for on/off states (e.g. ac_output_on)
   * Diagnostic sensors for serial number, firmware versions and device type
