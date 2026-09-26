@@ -52,4 +52,4 @@ jobs:
       - name: 🔨 Build Firmware
         run: |
             cd Bluetti_ESP32
-            arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs--build-property "compiler.cpp.extra_flags=-DELEGANTOTA_USE_ASYNC_WEBSERVER=1" Bluetti_ESP32.ino
+            arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=min_spiffs --build-property "compiler.cpp.extra_flags=-DELEGANTOTA_USE_ASYNC_WEBSERVER=1" Bluetti_ESP32.ino
