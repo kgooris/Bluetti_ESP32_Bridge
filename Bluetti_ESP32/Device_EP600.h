@@ -2,11 +2,14 @@
 #define DEVICE_EP600_H
 #include "Arduino.h"
 
+// every model has its own namespace, the tables are picked at runtime (see DeviceRegistry.h)
+namespace ep600 {
+
 // Based on https://doc.chromedshark.com/bluetti/ep600.html
 // and https://github.com/warhammerkid/bluetti_mqtt
 
 // { FIELD_NAME, PAGE, OFFSET, SIZE, SCALE (if scale is needed e.g. decimal value, defaults to 0) , ENUM (if data is enum, defaults to 0) , FIELD_TYPE }
-static device_field_data_t bluetti_device_state[] = {
+static const device_field_data_t bluetti_device_state[] = {
   {TOTAL_BATTERY_PERCENT,     0x00, 0x66, 1, 0, 0, UINT_FIELD},
   {DEVICE_TYPE,               0x00, 0x6E, 6, 0, 0, STRING_FIELD},   // TODO: swap string
   {SERIAL_NUMBER,             0x00, 0x74, 4, 0 ,0, SN_FIELD},
@@ -21,13 +24,15 @@ static device_field_data_t bluetti_device_state[] = {
   {AC_OUTPUT_CURRENT_MAX,     0x08, 0xA8, 1, 0, 0, UINT_FIELD},
 };
 
-static device_field_data_t bluetti_device_command[] = {};
+static const device_field_data_t bluetti_device_command[] = {};
 
 // {FIELD_NAME, PAGE, OFFSET, FIELDS_TO_READ, 0, 0, TYPE_UNDEFINED}
-static device_field_data_t bluetti_polling_command[] = {
+static const device_field_data_t bluetti_polling_command[] = {
   {FIELD_UNDEFINED,           0x00, 0x64, 0x3E, 0, 0, TYPE_UNDEFINED},
   {FIELD_UNDEFINED,           0x07, 0xD0, 0x30, 0, 0, TYPE_UNDEFINED},
   {FIELD_UNDEFINED,           0x08, 0x00, 0x29, 0, 0, TYPE_UNDEFINED},
 };
+
+} // namespace ep600
 
 #endif

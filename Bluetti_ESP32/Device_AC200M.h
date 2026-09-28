@@ -2,6 +2,9 @@
 #define DEVICE_AC200M_H
 #include "Arduino.h"
 
+// every model has its own namespace, the tables are picked at runtime (see DeviceRegistry.h)
+namespace ac200m {
+
 
 enum auto_sleep_mode {
   THIRTY_SECONDS = 2,
@@ -12,7 +15,7 @@ enum auto_sleep_mode {
 
 
 // { FIELD_NAME, PAGE, OFFSET, SIZE, SCALE (if scale is needed e.g. decimal value, defaults to 0) , ENUM (if data is enum, defaults to 0) , FIELD_TYPE }
-static device_field_data_t bluetti_device_state[] = {
+static const device_field_data_t bluetti_device_state[] = {
 
 
   /*Page 0x00 Core */
@@ -69,7 +72,7 @@ static device_field_data_t bluetti_device_state[] = {
 // parameters that can be set via mqtt.
 // Hint: In the case topics not appearing automatically on the mqtt server they need to be created manually.
 // This can be done with MqttExplorer for instance
-static device_field_data_t bluetti_device_command[] = {
+static const device_field_data_t bluetti_device_command[] = {
   /*Page 0x0B Core */
   {DC_OUTPUT_ON,              0x0B, 0xC0, 1, 0, 0, BOOL_FIELD},
   {AC_OUTPUT_ON,              0x0B, 0xBF, 1, 0, 0, BOOL_FIELD},
@@ -85,12 +88,14 @@ static device_field_data_t bluetti_device_command[] = {
   
 };
 
-static device_field_data_t bluetti_polling_command[] = {
+static const device_field_data_t bluetti_polling_command[] = {
   // Status
   // changed to only one page 0 request (a portion of 7F bytes)
   {FIELD_UNDEFINED,           0x00, 0x0A, 0x7F, 0, 0, TYPE_UNDEFINED},
   // Settings  
   {FIELD_UNDEFINED,           0x0B, 0xB9, 0x3F, 0, 0, TYPE_UNDEFINED}
 };
+
+} // namespace ac200m
 
 #endif

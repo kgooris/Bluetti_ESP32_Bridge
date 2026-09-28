@@ -53,29 +53,30 @@ void parse_bluetooth_data(uint8_t page, uint8_t offset, uint8_t* pData, size_t l
   sprintf(Byte_In_Hex_offset, "%x", offset);
   sprintf(Byte_In_Hex_page, "%x", page);
   
+    const DeviceDef* dev = activeDevice();
     switch(pData[1]){
       // range request
 
     case 0x03:
 
-      for (int i = 0; i < sizeof(bluetti_device_state) / sizeof(device_field_data_t); i++) {
+      for (size_t i = 0; i < dev->stateCount; i++) {
 
 
             // filter fields not in range, reworked by https://github.com/AlexBurghardt
             // the original code didn't work completely and skipped some fields to be published
             if(
               // it's the correct page
-              bluetti_device_state[i].f_page == page && 
+              dev->state[i].f_page == page && 
               // data offset greater than or equal to page offset
-              bluetti_device_state[i].f_offset >= offset &&
+              dev->state[i].f_offset >= offset &&
               // local offset does not exceed the page length, likely not needed because of the last condition check
-              ((2* ((int)bluetti_device_state[i].f_offset - (int)offset)) + HEADER_SIZE) <= length &&
+              ((2* ((int)dev->state[i].f_offset - (int)offset)) + HEADER_SIZE) <= length &&
               // local offset + data size do not exceed the page length
-              ((2* ((int)bluetti_device_state[i].f_offset - (int)offset + bluetti_device_state[i].f_size)) + HEADER_SIZE) <= length
+              ((2* ((int)dev->state[i].f_offset - (int)offset + dev->state[i].f_size)) + HEADER_SIZE) <= length
             ){
     
-                uint8_t data_start = (2* ((int)bluetti_device_state[i].f_offset - (int)offset)) + HEADER_SIZE;
-                uint8_t data_end = (data_start + 2 * bluetti_device_state[i].f_size);
+                uint8_t data_start = (2* ((int)dev->state[i].f_offset - (int)offset)) + HEADER_SIZE;
+                uint8_t data_end = (data_start + 2 * dev->state[i].f_size);
                 uint8_t data_payload_field[data_end - data_start];
                 
                 int p_index = 0;
@@ -84,36 +85,36 @@ void parse_bluetooth_data(uint8_t page, uint8_t offset, uint8_t* pData, size_t l
                       p_index++;
                 }
 
-                switch (bluetti_device_state[i].f_type){
+                switch (dev->state[i].f_type){
                  
                   case UINT_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, String(parse_uint_field(data_payload_field)));
+                    publishTopic(dev->state[i].f_name, String(parse_uint_field(data_payload_field)));
                     break;
     
                   case BOOL_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, String((int)parse_bool_field(data_payload_field)));
+                    publishTopic(dev->state[i].f_name, String((int)parse_bool_field(data_payload_field)));
                     break;
     
                   case DECIMAL_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, String(parse_decimal_field(data_payload_field, bluetti_device_state[i].f_scale ), 2) );
+                    publishTopic(dev->state[i].f_name, String(parse_decimal_field(data_payload_field, dev->state[i].f_scale ), 2) );
                     break;
     
                   case SN_FIELD:  
                     char sn[16];
                     sprintf(sn, "%lld", parse_serial_field(data_payload_field));
-                    publishTopic(bluetti_device_state[i].f_name, String(sn));
+                    publishTopic(dev->state[i].f_name, String(sn));
                     break;
     
                   case VERSION_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, String(parse_version_field(data_payload_field),2) );    
+                    publishTopic(dev->state[i].f_name, String(parse_version_field(data_payload_field),2) );    
                     break;
 
                   case STRING_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, parse_string_field(data_payload_field));
+                    publishTopic(dev->state[i].f_name, parse_string_field(data_payload_field));
                     break;
                   // doesn't work yet, not implemented further
                   case ENUM_FIELD:
-                    publishTopic(bluetti_device_state[i].f_name, parse_enum_field(data_payload_field));
+                    publishTopic(dev->state[i].f_name, parse_enum_field(data_payload_field));
                     break;
                   default:
                     break;

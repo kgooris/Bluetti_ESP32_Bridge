@@ -30,6 +30,8 @@ static BLEUUID    NOTIFY_UUID("0000ff01-0000-1000-8000-00805f9b34fb");
 
 // blocking scan, returns the names of the Bluetti devices found nearby
 std::vector<String> scanBluettiDevices(uint32_t seconds);
+// signal strength (dBm) of the connection to the power station, 0 when not connected
+int getBTRssi();
 void btResetStack();
 extern void initBluetooth();
 extern void handleBluetooth();

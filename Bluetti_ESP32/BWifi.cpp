@@ -1,6 +1,7 @@
 #include "BluettiConfig.h"
 #include "BWifi.h"
 #include "BTooth.h"
+#include "DeviceRegistry.h"
 #include "MQTT.h"
 #include "index.h"  //Web page header file
 #include <EEPROM.h>
@@ -12,6 +13,7 @@
 #include <vector>
 #include <ElegantOTA.h> // https://github.com/ayushsharma82/ElegantOTA/archive/master.zip
 #include "display.h"
+#include "SystemStats.h"
 
 AsyncWebServer server(80);
 AsyncEventSource events("/events");
@@ -45,6 +47,65 @@ void eeprom_read(){
   EEPROM.begin(512);
   EEPROM.get(0, wifiConfig);
   EEPROM.end();
+}
+
+int wifiQualityPercent(int rssi){
+  if (rssi <= -100) return 0;
+  if (rssi >= -50) return 100;
+  return 2 * (rssi + 100);
+}
+
+static String jsonString(const String& value){
+  String out = "\"";
+  for (size_t i = 0; i < value.length(); i++){
+    char c = value[i];
+    if (c == '"' || c == '\\'){
+      out += '\\';
+    }
+    if ((uint8_t)c >= 0x20){
+      out += c;
+    }
+  }
+  return out + "\"";
+}
+
+// seconds since a millis() timestamp, -1 when there was no message yet
+static long ageSeconds(unsigned long timestamp){
+  return timestamp == 0 ? -1 : (long)((millis() - timestamp) / 1000);
+}
+
+// everything the status page shows, sent on request (/status) and pushed with the events
+static String statusJson(){
+  updateSystemStats();
+  int rssi = WiFi.RSSI();
+  String j = "{";
+  j += "\"ip\":" + jsonString(WiFi.localIP().toString());
+  j += ",\"mac\":" + jsonString(WiFi.macAddress());
+  j += ",\"ssid\":" + jsonString(WiFi.SSID());
+  j += ",\"bssid\":" + jsonString(WiFi.BSSIDstr());
+  j += ",\"ch\":" + String(WiFi.channel());
+  j += ",\"rssi\":" + String(rssi);
+  j += ",\"up\":" + String(millis() / 1000);
+  j += ",\"cpu0\":" + String(cpuLoadPercent(0));
+  j += ",\"cpu1\":" + String(cpuLoadPercent(1));
+  j += ",\"heap_total\":" + String(ESP.getHeapSize());
+  j += ",\"heap_free\":" + String(ESP.getFreeHeap());
+  j += ",\"heap_min\":" + String(ESP.getMinFreeHeap());
+  j += ",\"mqtt_host\":" + jsonString(wifiConfig.mqtt_server);
+  j += ",\"mqtt_port\":" + jsonString(wifiConfig.mqtt_port);
+  j += ",\"mqtt_on\":" + String(isMQTTconnected() ? "true" : "false");
+  j += ",\"mqtt_age\":" + String(ageSeconds(getLastMQTTMessageTime()));
+  j += ",\"bt_id\":" + jsonString(wifiConfig.bluetti_device_id);
+  j += ",\"bt_on\":" + String(isBTconnected() ? "true" : "false");
+  j += ",\"bt_rssi\":" + String(getBTRssi());
+  j += ",\"bt_age\":" + String(ageSeconds(getLastBTMessageTime()));
+  j += ",\"errors\":" + String(getPublishErrorCount());
+  j += ",\"model\":" + jsonString(activeDevice()->name);
+  j += ",\"model_src\":" + jsonString(activeDeviceSource());
+  j += ",\"ha\":" + String(isHaDiscoveryEnabled() ? "true" : "false");
+  j += ",\"logging\":" + String(msgViewerDetails ? "true" : "false");
+  j += "}";
+  return j;
 }
 
 void loadBluettiSettings(){
@@ -136,12 +197,13 @@ void initBWifi(bool resetWifi){
 
   // The portal page is built in the AP callback, after the Bluetooth scan, so all parameters are added
   // there in display order. Parameters with custom HTML only are used for section headers and widgets.
-  String selectedBluetti, selectedDisplay, selectedHa;
+  String selectedBluetti, selectedModel, selectedDisplay, selectedHa;
   std::list<String> htmlStore; // keeps the HTML of the custom parameters alive while the portal runs
   std::vector<WiFiManagerParameter*> htmlParams;
 
   wifiManager.setSaveParamsCallback([&]() {
     selectedBluetti = wifiManager.server->arg("bluetti_sel");
+    selectedModel = wifiManager.server->arg("model_sel");
     selectedDisplay = wifiManager.server->arg("display_sel");
     selectedHa = wifiManager.server->arg("ha_sel");
   });
@@ -205,6 +267,24 @@ void initBWifi(bool resetWifi){
     wifiManager->addParameter(&custom_bluetti_device);
     addHtml("</div>");
 
+    // power station model: auto detects it from the name of the Bluetooth device
+    String modelHtml = "<br/><label for='model_sel'>Power station model</label><select id='model_sel' name='model_sel'>";
+    bool modelKnown = (wifiConfig.salt == EEPROM_SALT) && deviceByType(wifiConfig.bluetti_type) != nullptr;
+    modelHtml += selectOption("0", "Auto-detect from the Bluetooth name (recommended)", !modelKnown);
+    for (size_t i = 0; i < deviceCount(); i++){
+      const DeviceDef* device = deviceAt(i);
+      modelHtml += selectOption(String(device->type).c_str(), device->name, modelKnown && wifiConfig.bluetti_type == device->type);
+    }
+    modelHtml += "</select>";
+    String modelHint;
+    if (!found.empty() && savedBluettiId.length() == 0 && deviceByBleName(found[0].c_str()) != nullptr){
+      modelHint = String("Detected from the device found: ") + deviceByBleName(found[0].c_str())->name;
+    } else {
+      modelHint = String("In use now: ") + activeDevice()->name + " (" + activeDeviceSource() + ")";
+    }
+    modelHtml += "<br/><small>" + modelHint + "</small>";
+    addHtml(modelHtml);
+
     // other settings
     String otherHtml = sectionHtml("Other settings");
     otherHtml += "<label for='display_sel'>OLED display (SSD1306, skipped when none is found), applied after reboot</label><select id='display_sel' name='display_sel'>";
@@ -249,6 +329,9 @@ void initBWifi(bool resetWifi){
      if (selectedBluetti.length() > 0 && selectedBluetti != "__custom__"){
        strlcpy(wifiConfig.bluetti_device_id, selectedBluetti.c_str(), 40);
      }
+     if (selectedModel == "0" || deviceByType(selectedModel.toInt()) != nullptr){
+       wifiConfig.bluetti_type = selectedModel.toInt();
+     }
      if (selectedDisplay == "1" || selectedDisplay == "2"){
        wifiConfig.display_enabled = selectedDisplay.toInt();
      }
@@ -288,6 +371,7 @@ void initBWifi(bool resetWifi){
   }
   
   WiFi.setAutoReconnect(true);
+  activeDevice(); // settings are loaded, log the power station model in use
   Serial.printf("WiFi connected to %s (BSSID %s, RSSI %d dBm)\n", WiFi.SSID().c_str(), WiFi.BSSIDstr().c_str(), WiFi.RSSI());
 
   Serial.println(F(""));
@@ -309,7 +393,14 @@ void initBWifi(bool resetWifi){
   #endif
 
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-      request->send_P(200, "text/html", index_html, processorWebsiteUpdates);
+      request->send_P(200, "text/html", index_html);
+  });
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->send(200, "application/json", statusJson());
+  });
+  // the last BT/MQTT messages as <p>time: text</p> lines, the status page polls this while detailed logging is on
+  server.on("/log", HTTP_GET, [](AsyncWebServerRequest *request){
+      request->send(200, "text/plain", lastMsg);
   });
   server.on("/switchLogging", HTTP_GET, [](AsyncWebServerRequest *request){
       msgViewerDetails = !msgViewerDetails;
@@ -319,7 +410,7 @@ void initBWifi(bool resetWifi){
       else{
         Serial.println(F("webserver BT/MQTT variable logging disabled..."));
       }
-      request->send_P(200, "text/html", index_html, processorWebsiteUpdates);
+      request->send(200, "application/json", statusJson());
   });
   server.on("/rebootDevice", [](AsyncWebServerRequest *request) {
       request->send(200, "text/plain", "reboot in 2sec");
@@ -382,86 +473,14 @@ void handleWebserver() {
 
     // Send Events to the Web Server with current data
     events.send("ping",NULL,millis());
-    events.send(String(millis()).c_str(),"runtime",millis());
-    events.send(String(WiFi.RSSI()).c_str(),"rssi",millis());
-    events.send(String(isMQTTconnected()).c_str(),"mqtt_connected",millis());
-    events.send(String(getLastMQTTMessageTime()).c_str(),"mqtt_last_msg_time",millis());
-    events.send(String(isBTconnected()).c_str(),"bt_connected",millis());
-    events.send(String(getLastBTMessageTime()).c_str(),"bt_last_msg_time",millis());
-    if(msgViewerDetails){
-      events.send(lastMsg.c_str(),"last_msg",millis());
-    } 
+    if (events.count() > 0){
+      events.send(statusJson().c_str(),"status",millis());
+    }
     
     lastTimeWebUpdate = millis();
   }
 }
 
-
-String processorWebsiteUpdates(const String& var){
-  
-  if(var == "IP"){
-    return String(WiFi.localIP().toString());
-  }
-  else if(var == "RSSI"){
-    return String(WiFi.RSSI());
-  }
-  else if(var == "SSID"){
-    return String(WiFi.SSID());
-  }
-  else if(var == "MAC"){
-    return String(WiFi.macAddress());
-  }
-  else if(var == "RUNTIME"){
-    return String(millis());
-  }
-  else if(var == "MQTT_IP"){
-    char msg[40];
-    if (strlen(wifiConfig.mqtt_server) == 0){
-      strlcpy(msg, "No MQTT server configured", 40);
-    }else{
-      strlcpy(msg, wifiConfig.mqtt_server, 40);
-    }
-    
-    return msg;
-  }
-  else if(var == "MQTT_PORT"){
-    char msg[6];
-    strlcpy(msg, wifiConfig.mqtt_port, 6);
-    return msg;
-  }
-  else if(var == "MQTT_CONNECTED"){
-    return String(isMQTTconnected());
-  }
-  else if(var == "LAST_MQTT_MSG_TIME"){
-    return String(getLastMQTTMessageTime());
-  }
-  else if(var == "DEVICE_ID"){
-    char msg[40];
-    strlcpy(msg, wifiConfig.bluetti_device_id, 40);
-    return msg;
-  }
-  else if(var == "BT_CONNECTED"){
-    return String(isBTconnected());
-  }
-  else if(var == "LAST_BT_MSG_TIME"){
-    return String(getLastBTMessageTime());
-  }
-  else if(var == "BT_ERROR"){
-    return String(getPublishErrorCount());
-  }
-  else if(var == "LAST_MSG"){
-    if (msgViewerDetails){
-      return String("...waiting for data...");
-    }
-    else{
-      return String("...disabled...");
-    }
-  }
-  else //return something, else this if then else will crash in case calles without VAR set....
-  {
-    return String("");
-  }
-}
 
 void AddtoMsgView(String data){
   

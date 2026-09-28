@@ -130,12 +130,22 @@ static void notifyCallback(
    
 }
 
+static BLEClient* btClient = nullptr;
+
+int getBTRssi(){
+  if (!connected || btClient == nullptr || !btClient->isConnected()){
+    return 0;
+  }
+  return btClient->getRssi();
+}
+
 bool connectToServer() {
     Serial.print(F("[BT] Forming a connection to "));
     Serial.println(bluettiDevice->getAddress().toString().c_str());
 
     BLEDevice::setMTU(517); // set client to request maximum MTU from server (default is 23 otherwise)
     BLEClient*  pClient  = BLEDevice::createClient();
+    btClient = pClient;
     Serial.println(F("[BT] - Created client"));
 
     pClient->setClientCallbacks(new MyClientCallback());
@@ -248,18 +258,19 @@ void handleBluetooth(){
     // poll for device state
     if ( millis() - lastBTMessage > BLUETOOTH_QUERY_MESSAGE_DELAY){
 
+       const DeviceDef* dev = activeDevice();
        bt_command_t command;
        command.prefix = 0x01;
        command.field_update_cmd = 0x03;
-       command.page = bluetti_polling_command[pollTick].f_page;
-       command.offset = bluetti_polling_command[pollTick].f_offset;
-       command.len = (uint16_t) bluetti_polling_command[pollTick].f_size << 8;
+       command.page = dev->polling[pollTick].f_page;
+       command.offset = dev->polling[pollTick].f_offset;
+       command.len = (uint16_t) dev->polling[pollTick].f_size << 8;
        command.check_sum = modbus_crc((uint8_t*)&command,6);
 
        xQueueSend(commandHandleQueue, &command, portMAX_DELAY);
        xQueueSend(sendQueue, &command, portMAX_DELAY);
 
-       if (pollTick == sizeof(bluetti_polling_command)/sizeof(device_field_data_t)-1 ){
+       if (pollTick == dev->pollingCount-1 ){
            pollTick = 0;
        } else {
            pollTick++;

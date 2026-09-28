@@ -14,10 +14,11 @@ Join the Discord Server https://discord.gg/fWDSBTCVmB
 * Home Assistant MQTT auto-discovery (no YAML needed, see [Home Assistant](#home-assistant))
 * support for BLUETTI power stations
   * AC300 (tested)
-  * AC200 (tested)
+  * AC200M (tested)
   * EB3A (tested)
   * EP500 (untested)
   * EP500P (tested)
+  * AC500 (untested)
   * EP600 (some values still missing)
 * supported BLUETTI functions
   * commands
@@ -111,7 +112,7 @@ Bluetti Device. Optionally you can specify username and password to protect the 
 When the portal opens, the ESP32 scans for 5 seconds for Bluetti devices nearby. Switch on your power station first, then pick it from the "Detected Bluetti devices" list (this overrides the ID typed above). If nothing is found, you can still type the ID by hand, using a mobile phone and/or the Bluetti APP to find the correct Bluetooth ID of your device.
 
 The portal also has these options:
-* Power station model: "Auto-detect from the Bluetooth name" (default, e.g. `AC200M...` selects the AC200M) or one of the supported models (AC300, AC200M, EP500, EP500P, EB3A, AC500, EP600). Choose one by hand if the name of your device is not recognised. The model used is printed in the serial log at boot (`[Device] Power station model ...`).
+* Power station model: "Auto-detect from the Bluetooth name" (default, e.g. `AC200M...` selects the AC200M) or one of the supported models (AC300, AC200M, EP500, EP500P, EB3A, AC500, EP600). Choose one by hand if the name of your device is not recognised. The model in use is shown on the status page (`AC200M`, with `auto-detected`, `chosen in setup` or `config.h default` next to it), in the `bluetti/<your_device_id>/state/device` MQTT topic (`Model`, `ModelSource`), on the Home Assistant device page and in the serial log at boot (`[Device] Power station model ...`).
 * OLED display (SSD1306): enabled by default. If no display is found on the I2C bus, it is skipped automatically. Choose "Disabled" to never use it. Changing it reboots the ESP32.
 * Home Assistant auto-discovery: enabled by default, see [Home Assistant](#home-assistant).
 
@@ -164,6 +165,7 @@ How it works:
   * Sensors for power (W), voltage (V), current (A), frequency (Hz), battery (%) and power generation (kWh)
   * Binary sensors for on/off states (e.g. ac_output_on)
   * Diagnostic sensors for serial number, firmware versions and device type
+  * Diagnostic sensors for the signal quality of the bridge: WiFi signal (dBm and %), WiFi access point (BSSID) and channel, and the Bluetooth signal to the power station (dBm)
   * Switches for commands with on/off (e.g. ac_output_on, dc_output_on)
   * Selects for enum commands (led_mode, eco_shutdown, charging_mode) on devices that define them
 
@@ -197,6 +199,17 @@ Display functionality:
 Example display screen:
 ![DisplayImage](doc/images/display.jpg)
 
+## Status page
+
+Open `http://<ip_address>` after the device is configured to see a live status page (updated over Server-Sent Events, no page reload needed):
+* WiFi (IP, SSID, access point, channel, signal) and Bluetooth (device ID, connection, signal) status
+* MQTT broker, connection state and time since the last message
+* Power station model in use and how it was chosen (auto-detected, chosen in setup or config.h default)
+* System card: uptime, CPU load per core and free heap memory
+* Error counter for failed MQTT publishes
+* A scrollable message log, switched on/off with a button on the page (same setting as `MSG_VIEWER_DETAILS`)
+
+The data is served as JSON from `/status`, the log lines from `/log`.
 
 ## TODO
 

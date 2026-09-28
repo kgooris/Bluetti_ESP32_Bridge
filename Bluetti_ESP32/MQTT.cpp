@@ -16,7 +16,19 @@ unsigned long lastMQTTMessage = 0;
 unsigned long previousDeviceStatePublish = 0;
 unsigned long previousDeviceStateStatusPublish = 0;
 unsigned long previousMqttReconnect = 0;
+unsigned long previousSignalPublish = 0;
+
+// seconds between the WiFi / Bluetooth signal quality publishes
+#ifndef SIGNAL_STATE_UPDATE
+  #define SIGNAL_STATE_UPDATE 30
+#endif
 int lastAvailabilityBT = -1; // last published Bluetooth state, -1 = nothing published yet
+
+// last will topic: "online" while the ESP32 is connected to the MQTT broker
+String bridgeTopic(){
+  ESPBluettiSettings settings = get_esp32_bluetti_settings();
+  return "bluetti/" + String(settings.bluetti_device_id) + "/state/bridge";
+}
 
 String availabilityTopic(){
   ESPBluettiSettings settings = get_esp32_bluetti_settings();
@@ -299,6 +311,7 @@ String map_command_value(String command_name, String value){
 
 // Callback function
 void callback(char* topic, byte* payload, unsigned int length) {
+  const DeviceDef* dev = activeDevice();
   payload[length] = '\0';
   String topic_path = String(topic);
   topic_path.toLowerCase();//in case we recieve DC_OUTPUT_ON instead of the expected dc_output_on
@@ -314,12 +327,12 @@ void callback(char* topic, byte* payload, unsigned int length) {
   command.field_update_cmd = 0x06;
 
   int matched = -1;
-  for (int i=0; i< sizeof(bluetti_device_command)/sizeof(device_field_data_t); i++){
-      if (topic_path.indexOf(map_field_name(bluetti_device_command[i].f_name)) > -1){
-            command.page = bluetti_device_command[i].f_page;
-            command.offset = bluetti_device_command[i].f_offset;
+  for (int i=0; i< dev->commandCount; i++){
+      if (topic_path.indexOf(map_field_name(dev->command[i].f_name)) > -1){
+            command.page = dev->command[i].f_page;
+            command.offset = dev->command[i].f_offset;
             
-			      String current_name = map_field_name(bluetti_device_command[i].f_name);
+			      String current_name = map_field_name(dev->command[i].f_name);
             strPayload = map_command_value(current_name,strPayload);
             matched = i;
     }
@@ -339,8 +352,8 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
   // The real state is only read back on the next poll cycle (up to ~15 s). Publish the expected
   // state right away, otherwise Home Assistant flips the switch back until the poll catches up.
-  if (bluetti_device_command[matched].f_type == BOOL_FIELD){
-    publishTopic(bluetti_device_command[matched].f_name, strPayload.toInt() ? "1" : "0");
+  if (dev->command[matched].f_type == BOOL_FIELD){
+    publishTopic(dev->command[matched].f_name, strPayload.toInt() ? "1" : "0");
   }
 }
 
@@ -406,7 +419,7 @@ void publishDeviceState(){
 
   ESPBluettiSettings settings = get_esp32_bluetti_settings();
   sprintf(publishTopicBuf, "bluetti/%s/state/%s", settings.bluetti_device_id, "device" ); 
-  String value = "{\"IP\":\"" + WiFi.localIP().toString() + "\", \"MAC\":\"" + WiFi.macAddress() + "\", \"Uptime\":" + millis() + "}";
+  String value = "{\"IP\":\"" + WiFi.localIP().toString() + "\", \"MAC\":\"" + WiFi.macAddress() + "\", \"Model\":\"" + activeDevice()->name + "\", \"ModelSource\":\"" + activeDeviceSource() + "\", \"Uptime\":" + millis() + "}";
   #ifdef DEBUG
     Serial.println("[MQTT] PublishingDeviceState: "+value);
   #endif
@@ -416,6 +429,28 @@ void publishDeviceState(){
   lastMQTTMessage = millis();
   previousDeviceStatePublish = millis();
  
+}
+
+static void publishSignalTopic(const char* field, const String& value){
+  ESPBluettiSettings settings = get_esp32_bluetti_settings();
+  String topic = "bluetti/" + String(settings.bluetti_device_id) + "/state/" + field;
+  if (!client.publish(topic.c_str(), value.c_str())){
+    publishErrorCount++;
+  }
+}
+
+// WiFi and Bluetooth signal quality of the bridge
+void publishSignalStatus(){
+  int rssi = WiFi.RSSI();
+  publishSignalTopic("wifi_rssi", String(rssi));
+  publishSignalTopic("wifi_quality", String(wifiQualityPercent(rssi)));
+  publishSignalTopic("wifi_ap", WiFi.BSSIDstr());
+  publishSignalTopic("wifi_channel", String(WiFi.channel()));
+  int btRssi = getBTRssi();
+  if (btRssi != 0){
+    publishSignalTopic("bt_rssi", String(btRssi));
+  }
+  previousSignalPublish = millis();
 }
 
 void publishDeviceStateStatus(){
@@ -436,16 +471,18 @@ void publishDeviceStateStatus(){
 }
 
 // Home Assistant MQTT auto-discovery (retained config messages)
-static void publishHAEntity(const char* component, const String& field, const String& body){
+// bridgeOnly: entity is available as long as the ESP32 is on MQTT (WiFi signal), otherwise Bluetooth must be connected too
+static void publishHAEntity(const char* component, const String& field, const String& body, bool bridgeOnly = false){
   ESPBluettiSettings settings = get_esp32_bluetti_settings();
   String id = String(settings.bluetti_device_id);
   id.replace(" ", "_");
   String topic = "homeassistant/" + String(component) + "/bluetti_" + id + "/" + field + "/config";
 
   String payload = "{\"name\":\"" + field + "\","
-    "\"unique_id\":\"bluetti_" + id + "_" + field + "\","
-    "\"availability_topic\":\"" + availabilityTopic() + "\","
-    "\"device\":{\"identifiers\":[\"bluetti_" + id + "\"],\"name\":\"Bluetti " + id + "\",\"manufacturer\":\"Bluetti\"}," + body + "}";
+    "\"unique_id\":\"bluetti_" + id + "_" + field + "\"," +
+    (bridgeOnly ? "\"availability_topic\":\"" + bridgeTopic() + "\","
+                : "\"availability\":[{\"topic\":\"" + bridgeTopic() + "\"},{\"topic\":\"" + availabilityTopic() + "\"}],\"availability_mode\":\"all\",") +
+    "\"device\":{\"identifiers\":[\"bluetti_" + id + "\"],\"name\":\"Bluetti " + id + "\",\"manufacturer\":\"Bluetti\",\"model\":\"" + activeDevice()->name + "\"}," + body + "}";
 
   if (!client.publish(topic.c_str(), payload.c_str(), true)){
     publishErrorCount++;
@@ -457,6 +494,8 @@ static String haSensorAttrs(const String& f){
   if (f.endsWith("_percent") || f.endsWith("_percentage")) return ",\"device_class\":\"battery\",\"unit_of_measurement\":\"%\",\"state_class\":\"measurement\"";
   if (f == "power_generation") return ",\"device_class\":\"energy\",\"unit_of_measurement\":\"kWh\",\"state_class\":\"total_increasing\"";
   if (f.indexOf("power") >= 0 && !f.endsWith("_on")) return ",\"device_class\":\"power\",\"unit_of_measurement\":\"W\",\"state_class\":\"measurement\"";
+  // battery cell voltages (about 3 V) are shown with 2 decimals, the decimals matter there
+  if (f.indexOf("cell") >= 0 && f.indexOf("voltage") >= 0) return ",\"device_class\":\"voltage\",\"unit_of_measurement\":\"V\",\"state_class\":\"measurement\",\"suggested_display_precision\":2";
   if (f.indexOf("voltage") >= 0) return ",\"device_class\":\"voltage\",\"unit_of_measurement\":\"V\",\"state_class\":\"measurement\"";
   if (f.indexOf("current") >= 0) return ",\"device_class\":\"current\",\"unit_of_measurement\":\"A\",\"state_class\":\"measurement\"";
   if (f.indexOf("frequency") >= 0) return ",\"device_class\":\"frequency\",\"unit_of_measurement\":\"Hz\",\"state_class\":\"measurement\"";
@@ -466,13 +505,14 @@ static String haSensorAttrs(const String& f){
 void publishHAConfig(){
   ESPBluettiSettings settings = get_esp32_bluetti_settings();
   String base = "bluetti/" + String(settings.bluetti_device_id);
+  const DeviceDef* dev = activeDevice();
 
   // state fields -> sensor / binary_sensor
-  for (int i=0; i< sizeof(bluetti_device_state)/sizeof(device_field_data_t); i++){
-    String f = map_field_name(bluetti_device_state[i].f_name);
+  for (int i=0; i< dev->stateCount; i++){
+    String f = map_field_name(dev->state[i].f_name);
     if (f == "unknown") continue;
     String st = "\"state_topic\":\"" + base + "/state/" + f + "\"";
-    switch (bluetti_device_state[i].f_type){
+    switch (dev->state[i].f_type){
       case BOOL_FIELD:
         publishHAEntity("binary_sensor", f, st + ",\"payload_on\":\"1\",\"payload_off\":\"0\"");
         break;
@@ -492,12 +532,12 @@ void publishHAConfig(){
   }
 
   // commands -> switch (on/off) or select (enums)
-  for (int i=0; i< sizeof(bluetti_device_command)/sizeof(device_field_data_t); i++){
-    String f = map_field_name(bluetti_device_command[i].f_name);
+  for (int i=0; i< dev->commandCount; i++){
+    String f = map_field_name(dev->command[i].f_name);
     if (f == "unknown") continue;
     String cmd = "\"command_topic\":\"" + base + "/command/" + f + "\"";
     String st = "\"state_topic\":\"" + base + "/state/" + f + "\"";
-    if (bluetti_device_command[i].f_type == BOOL_FIELD){
+    if (dev->command[i].f_type == BOOL_FIELD){
       publishHAEntity("switch", f, cmd + "," + st + ",\"payload_on\":\"ON\",\"payload_off\":\"OFF\",\"state_on\":\"1\",\"state_off\":\"0\"");
     } else if (f == "led_mode"){
       publishHAEntity("select", f, cmd + "," + st + ",\"options\":[\"LED_LOW\",\"LED_HIGH\",\"LED_SOS\",\"LED_OFF\"]");
@@ -507,11 +547,21 @@ void publishHAConfig(){
       publishHAEntity("select", f, cmd + "," + st + ",\"options\":[\"STANDARD\",\"SILENT\",\"TURBO\"]");
     }
   }
+
+  // signal quality of the bridge (diagnostic)
+  const String diagnostic = ",\"entity_category\":\"diagnostic\"";
+  const String signalAttrs = ",\"device_class\":\"signal_strength\",\"unit_of_measurement\":\"dBm\",\"state_class\":\"measurement\"" + diagnostic;
+  publishHAEntity("sensor", "wifi_rssi", "\"state_topic\":\"" + base + "/state/wifi_rssi\"" + signalAttrs, true);
+  publishHAEntity("sensor", "wifi_quality", "\"state_topic\":\"" + base + "/state/wifi_quality\",\"unit_of_measurement\":\"%\",\"state_class\":\"measurement\"" + diagnostic, true);
+  publishHAEntity("sensor", "wifi_ap", "\"state_topic\":\"" + base + "/state/wifi_ap\"" + diagnostic, true);
+  publishHAEntity("sensor", "wifi_channel", "\"state_topic\":\"" + base + "/state/wifi_channel\"" + diagnostic, true);
+  publishHAEntity("sensor", "bt_rssi", "\"state_topic\":\"" + base + "/state/bt_rssi\"" + signalAttrs);
 }
 
 void initMQTT(){
 
     enum field_names f_name;
+    const DeviceDef* dev = activeDevice();
     ESPBluettiSettings settings = get_esp32_bluetti_settings();
     Serial.println("[MQTT] init MQTT");
     if (strlen(settings.mqtt_server) == 0){
@@ -530,9 +580,9 @@ void initMQTT(){
     bool connect_result;
     const char connect_id[] = "Bluetti_ESP32";
     if (settings.mqtt_username) {
-        connect_result = client.connect(connect_id, settings.mqtt_username, settings.mqtt_password, availabilityTopic().c_str(), 0, true, "offline");
+        connect_result = client.connect(connect_id, settings.mqtt_username, settings.mqtt_password, bridgeTopic().c_str(), 0, true, "offline");
     } else {
-        connect_result = client.connect(connect_id, NULL, NULL, availabilityTopic().c_str(), 0, true, "offline");
+        connect_result = client.connect(connect_id, NULL, NULL, bridgeTopic().c_str(), 0, true, "offline");
     }
     
     if (connect_result) {
@@ -540,11 +590,13 @@ void initMQTT(){
       Serial.println(F("[MQTT] Connected to MQTT Server... "));
 
       // subscribe to topics for commands
-      for (int i=0; i< sizeof(bluetti_device_command)/sizeof(device_field_data_t); i++){
-        subscribeTopic(bluetti_device_command[i].f_name);
+      for (int i=0; i< dev->commandCount; i++){
+        subscribeTopic(dev->command[i].f_name);
       }
 
+      client.publish(bridgeTopic().c_str(), "online", true);
       publishAvailability();
+      publishSignalStatus();
       publishDeviceState();
       publishDeviceStateStatus();
       if (isHaDiscoveryEnabled()){
@@ -566,6 +618,9 @@ void handleMQTT(){
       ESP.restart();
     }
       
+    if (client.connected() && (millis() - previousSignalPublish) > (SIGNAL_STATE_UPDATE * 1000UL)){
+      publishSignalStatus();
+    }
     if ((millis() - previousDeviceStatePublish) > (DEVICE_STATE_UPDATE * 60000)){ 
       publishDeviceState();
     }
