@@ -211,6 +211,8 @@ Open `http://<ip_address>` after the device is configured to see a live status p
 
 The data is served as JSON from `/status`, the log lines from `/log`.
 
+![DisplayImage](doc/images/statuspage.png)
+
 ## TODO
 
 * add full feature set to device files
